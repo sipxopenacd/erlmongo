@@ -1,6 +1,73 @@
 -module(mongoapi, [Pool,DB]).
-% -export([save/1,findOne/2,findOne/1,find/1,find/2,find/3,find/4, update/2, insert/1]).
--compile(export_all).
+
+-export([
+	save/1,
+	insert/1,
+	findOne/2,
+	findOne/1,
+	find/2,
+	find/1,
+	find/4,
+	set_encode_style/1,
+	set_encode_style/0,
+	recinfo/2,
+	remove/2,
+	update/3,
+	update/4,
+	batchUpdate/3,
+	batchUpdate/4,
+	encbu/4,
+	updateflags/2,
+	insert/2,
+	batchInsert/2,
+	batchInsert/1,
+	findOne/3,
+	findOpt/6,
+	findOpt/5,
+	findOpt/3,
+	findOpt/2,
+	cursor/6,
+	cursor/5,
+	getMore/2,
+	closeCursor/1,
+	translateopts/4,
+	ensureIndex/2,
+	ensureIndex/3,
+	deleteIndexes/1,
+	deleteIndex/2,
+	count/1,
+	count/2,
+	addUser/2,
+	group/5,
+	eval/1,
+	runCmd/1,
+	stats/1,
+	repairDatabase/0,
+	dropDatabase/0,
+	cloneDatabase/1,
+	dropCollection/1,
+	createCollection/1,
+	createCollection/2,
+	translatecolopts/2,
+	setProfilingLevel/1,
+	getProfilingLevel/0,
+	gfsIndexes/0,
+	gfsIndexes/1,
+	gfsNew/1,
+	gfsNew/2,
+	gfsNew/3,
+	gfsopts/2,
+	gfsWrite/2,
+	gfsFlush/1,
+	gfsClose/1,
+	gfsOpen/1,
+	gfsOpen/2,
+	gfsRead/2,
+	gfsDelete/1,
+	gfsDelete/2,
+	testw/2
+]).
+
 -include_lib("erlmongo.hrl").
 
 set_encode_style(mochijson) ->
@@ -235,11 +302,11 @@ find(Query, Selector, From, Limit) ->
 % SortBy: {key, Val} or a list of keyval tuples -> {i,1}  (1 = ascending, -1 = descending)
 % Hint: [{Key,Val}] -> [{#mydoc.i,1}]
 findOpt(Col, Query, Selector, Opts, From, Limit) when is_list(Query) ->
-	case Query of
+	{_, Q} = case Query of
 		[] ->
-			{_,Q} = translateopts(false,undefined, Opts,[{<<"query">>, {bson,mongodb:encode([])}}]);
+			translateopts(false,undefined, Opts,[{<<"query">>, {bson,mongodb:encode([])}}]);
 		_ ->
-			{_,Q} = translateopts(false,undefined, Opts,[{<<"query">>, Query}])
+			translateopts(false,undefined, Opts,[{<<"query">>, Query}])
 	end,
 	find(Col, Q, Selector, From, Limit);
 % SortBy examples: {#mydoc.name, 1}, [{#mydoc.i, 1},{#mydoc.name,-1}]
@@ -383,23 +450,23 @@ deleteIndex(Rec, Key) ->
 count(Col) ->
 	count(Col,undefined).
 count(ColIn, Query) ->
-	case true of
+	Col = case true of
 		_ when is_list(ColIn) ->
-			Col = list_to_binary(ColIn);
+			list_to_binary(ColIn);
 		_ when is_tuple(ColIn) ->
-			Col = atom_to_binary(element(1,ColIn), latin1);
+			atom_to_binary(element(1,ColIn), latin1);
 		_ ->
-			Col = ColIn
+			ColIn
 	end,
-	case true of
+	Cmd = case true of
 		_ when is_list(Query) ->
-			Cmd = [{plaintext, <<"count">>, Col}, {plaintext, <<"ns">>, DB}, {<<"query">>, {bson, mongodb:encode(Query)}}];
+			[{plaintext, <<"count">>, Col}, {plaintext, <<"ns">>, DB}, {<<"query">>, {bson, mongodb:encode(Query)}}];
 		_ when is_tuple(ColIn), Query == undefined ->
-			Cmd = [{plaintext, <<"count">>, Col}, {plaintext, <<"ns">>, DB}, {<<"query">>, {bson, mongodb:encoderec(ColIn)}}];
+			[{plaintext, <<"count">>, Col}, {plaintext, <<"ns">>, DB}, {<<"query">>, {bson, mongodb:encoderec(ColIn)}}];
 		_ when is_tuple(ColIn), is_tuple(Query) ->
-			Cmd = [{plaintext, <<"count">>, Col}, {plaintext, <<"ns">>, DB}, {<<"query">>, {bson, mongodb:encoderec(Query)}}];
+			[{plaintext, <<"count">>, Col}, {plaintext, <<"ns">>, DB}, {<<"query">>, {bson, mongodb:encoderec(Query)}}];
 		_ when Query == undefined ->
-			Cmd = [{plaintext, <<"count">>, Col}, {plaintext, <<"ns">>, DB}]
+			[{plaintext, <<"count">>, Col}, {plaintext, <<"ns">>, DB}]
 	end,
 	case mongodb:exec_cmd(Pool,DB, Cmd) of
 		[{<<"n">>, Val}|_] ->

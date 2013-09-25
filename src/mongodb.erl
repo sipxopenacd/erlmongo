@@ -356,43 +356,43 @@ handle_cast(_, P) ->
 % 	end,
 % 	put(Name,P#conn{timer = Timer});
 start_connection(Name, #conn{conninfo = {multimaster, Srvrs}} = P) ->
-	case P#conn.pid of
+	Timer = case P#conn.pid of
 		undefined ->
-			Timer = P#conn.timer,
 			Index = random:uniform(tuple_size(Srvrs)),
 			{Adr,Port} = element(Index,Srvrs),
-			startcon(Name,P#conn.pid,readwrite,Adr,Port);
+			startcon(Name,P#conn.pid,readwrite,Adr,Port),
+			P#conn.timer;
 		_ ->
-			Timer = ctimer(P#conn.timer)
+			ctimer(P#conn.timer)
 	end,
 	put(Name,P#conn{timer = Timer});
 start_connection(Name, #conn{conninfo = {masterSlave, {A1,P1},{_A2,_P2}}} = P)  ->
-	case P#conn.pid of
+	Timer = case P#conn.pid of
 		undefined ->
-			Timer = P#conn.timer,
-			startcon(Name,P#conn.pid,readwrite,A1,P1);
+			startcon(Name,P#conn.pid,readwrite,A1,P1),
+			P#conn.timer;
 		_ ->
-			Timer = ctimer(P#conn.timer)
+			ctimer(P#conn.timer)
 	end,
 	put(Name,P#conn{timer = Timer});
 start_connection(Name, #conn{conninfo = {replicaPairs, {A1,P1},{A2,P2}}} = P)  ->
-	case P#conn.pid of
+	Timer = case P#conn.pid of
 		undefined ->
 			% io:format("starting~n"),
-			Timer = P#conn.timer,
 			startcon(Name, undefined, ifmaster, A1,P1),
-			startcon(Name, undefined, ifmaster, A2,P2);
+			startcon(Name, undefined, ifmaster, A2,P2),
+			P#conn.timer;
 		_ ->
-			Timer = ctimer(P#conn.timer)
+			ctimer(P#conn.timer)
 	end,
 	put(Name,P#conn{timer = Timer});
 start_connection(Name,#conn{conninfo = {replicaSets,L}} = P) ->
-	case P#conn.pid of
+	Timer = case P#conn.pid of
 		undefined ->
-			Timer = P#conn.timer,
-			[startcon(Name,undefined,ifmaster,A,Po) || {A,Po} <- L];
+			[startcon(Name,undefined,ifmaster,A,Po) || {A,Po} <- L],
+			P#conn.timer;
 		_ ->
-			Timer = ctimer(P#conn.timer)
+			ctimer(P#conn.timer)
 	end,
 	put(Name,P#conn{timer = Timer});
 start_connection(_,_) ->
@@ -580,13 +580,13 @@ gfs_proc(#gfs_state{mode = read} = P, Buf) ->
 		{read, Source, RecN} ->
 			CSize = (P#gfs_state.file)#gfs_file.chunkSize,
 			FileLen = (P#gfs_state.file)#gfs_file.length,
-			case FileLen - CSize * P#gfs_state.nchunk of
+			N = case FileLen - CSize * P#gfs_state.nchunk of
 				LenRem when LenRem >= RecN ->
-					N = RecN;
+					RecN;
 				LenRem when LenRem > 0 ->
-					N = LenRem;
+					LenRem;
 				_ ->
-					N = byte_size(Buf)
+					byte_size(Buf)
 			end,
 			% io:format("reading ~p, ~p~n", [N, byte_size(Buf)]),
 			case true of
@@ -614,13 +614,14 @@ gfs_proc(#gfs_state{mode = read} = P, Buf) ->
 						ResBin ->
 							% io:format("Result ~p~n", [ResBin]),
 							Result = chunk2bin(mongodb:decode(ResBin), <<>>),
-							case true of
+							Rem = case true of
 								_ when byte_size(Result) + byte_size(Buf) =< N ->
-									Rem = <<>>,
-									Source ! {gfs_bytes, <<Buf/binary, Result/binary>>};
+									Source ! {gfs_bytes, <<Buf/binary, Result/binary>>},
+									<<>>;
 								_ ->
-									<<ReplyBin:N/binary, Rem/binary>> = <<Buf/binary, Result/binary>>,
-									Source ! {gfs_bytes, ReplyBin}
+									<<ReplyBin:N/binary, Rem0/binary>> = <<Buf/binary, Result/binary>>,
+									Source ! {gfs_bytes, ReplyBin},
+									Rem0
 							end,
 							gfs_proc(P#gfs_state{nchunk = P#gfs_state.nchunk + GetChunks}, Rem)
 					end
@@ -654,19 +655,18 @@ gfsflush(P, Bin, Out) ->
 		Rem when byte_size(Out) > 0 ->
 			File = P#gfs_state.file,
 			exec_insert(P#gfs_state.pool,<<(P#gfs_state.collection)/binary, ".chunks">>, #insert{documents = Out}),
-			case P#gfs_state.closed of
+			MD5 = case P#gfs_state.closed of
 				true ->
 					MD5Cmd = exec_cmd(P#gfs_state.pool,P#gfs_state.db, [{<<"filemd5">>, FileID},{<<"root">>, P#gfs_state.coll_name}]),
 					case proplists:get_value(<<"md5">>,MD5Cmd) of
 						undefined ->
 							io:format("Md5 cmd failed ~p", [MD5Cmd]),
-							MD5 = undefined,
-							ok;
-						MD5 ->
-							ok
+							undefined;
+						MD5r ->
+							MD5r
 					end;
 				false ->
-					MD5 = undefined
+					undefined
 			end,
 			exec_update(P#gfs_state.pool,<<(P#gfs_state.collection)/binary, ".files">>, #update{selector = mongodb:encode([{<<"_id">>, FileID}]),
 																		document = mongodb:encoderec(File#gfs_file{length = P#gfs_state.length,
@@ -838,11 +838,11 @@ constr_killcursors(U) ->
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 recfields(Rec) ->
-	case true of
+	RecFields = case true of
 		_ when is_tuple(Rec) ->
-			RecFields = get({recinfo, element(1,Rec)});
+			get({recinfo, element(1,Rec)});
 		_ when is_atom(Rec) ->
-			RecFields = get({recinfo, Rec})
+			get({recinfo, Rec})
 	end,
 	case RecFields of
 		undefined ->
@@ -854,11 +854,11 @@ recfields(Rec) ->
 			Fields
 	end.
 recoffset(Rec) ->
-	case true of
+	RecFields = case true of
 		_ when is_tuple(Rec) ->
-			RecFields = get({recinfo, element(1,Rec)});
+			get({recinfo, element(1,Rec)});
 		_ when is_atom(Rec) ->
-			RecFields = get({recinfo, Rec})
+			get({recinfo, Rec})
 	end,
 	case RecFields of
 		undefined ->
@@ -886,11 +886,11 @@ encoderec(NameRec, Type, Rec, [{FieldName, _RecIndex}|T], N, Bin) ->
 		SubRec when Type == flat ->
 			% [_|SubFields] = element(element(2, SubRec), ?RECTABLE),
 			SubFields = recfields(SubRec),
-			case NameRec of
+			Dom = case NameRec of
 				<<>> ->
-					Dom = atom_to_binary(FieldName, latin1);
+					atom_to_binary(FieldName, latin1);
 				_ ->
-					Dom = <<NameRec/binary, ".", (atom_to_binary(FieldName, latin1))/binary>>
+					<<NameRec/binary, ".", (atom_to_binary(FieldName, latin1))/binary>>
 			end,
 			encoderec(NameRec, Type, Rec, T, N+1, <<Bin/binary, (encoderec(Dom, flat, SubRec, SubFields, recoffset(FieldName), <<>>))/binary>>);
 		Val ->
@@ -903,11 +903,11 @@ encoderec(NameRec, Type, Rec, [FieldName|T], N, Bin) ->
 		Val ->
 			case FieldName of
 				docid ->
-					case NameRec of
+					Dom = case NameRec of
 						<<>> ->
-							Dom = <<"_id">>;
+							<<"_id">>;
 						_ ->
-							Dom = <<NameRec/binary, "._id">>
+							<<NameRec/binary, "._id">>
 					end,
 					case Val of
 						{oid, _} ->
@@ -916,11 +916,11 @@ encoderec(NameRec, Type, Rec, [FieldName|T], N, Bin) ->
 							encoderec(NameRec, Type,Rec, T, N+1, <<Bin/binary, (encode_element({Dom, Val}))/binary>>)
 					end;
 				_ ->
-					case NameRec of
+					Dom = case NameRec of
 						<<>> ->
-							Dom = atom_to_binary(FieldName, latin1);
+							atom_to_binary(FieldName, latin1);
 						_ ->
-							Dom = <<NameRec/binary, ".", (atom_to_binary(FieldName, latin1))/binary>>
+							<<NameRec/binary, ".", (atom_to_binary(FieldName, latin1))/binary>>
 					end,
 					encoderec(NameRec, Type,Rec, T, N+1, <<Bin/binary, (encode_element({Dom, Val}))/binary>>)
 			end
@@ -967,13 +967,13 @@ encoderec_selector([], _, _, Bin) ->
 gen_prop_keyname([{[_|_] = KeyName, KeyVal}|T], Bin) ->
 	gen_prop_keyname([{list_to_binary(KeyName), KeyVal}|T], Bin);
 gen_prop_keyname([{KeyName, KeyVal}|T], Bin) ->
-	case is_integer(KeyVal) of
+	Add = case is_integer(KeyVal) of
 		true when T == [] ->
-			Add = <<(list_to_binary(integer_to_list(KeyVal)))/binary>>;
+			<<(list_to_binary(integer_to_list(KeyVal)))/binary>>;
 		true ->
-			Add = <<(list_to_binary(integer_to_list(KeyVal)))/binary,"_">>;
+			<<(list_to_binary(integer_to_list(KeyVal)))/binary,"_">>;
 		false ->
-			Add = <<>>
+			<<>>
 	end,
 	gen_prop_keyname(T, <<Bin/binary, KeyName/binary, "_", Add/binary>>);
 gen_prop_keyname([], B) ->
@@ -985,19 +985,19 @@ gen_keyname(Rec, Keys) ->
 	gen_keyname(Keys, Fields, recoffset(Rec), <<>>).
 
 gen_keyname([{KeyIndex, KeyVal}|Keys], [Field|Fields], KeyIndex, Name) ->
-	case Field of
-		{FieldName, _} ->
-			true;
-		FieldName ->
-			true
+	FieldName = case Field of
+		{Name0, _} ->
+			Name0;
+		Name1 ->
+			Name1
 	end,
-	case is_integer(KeyVal) of
+	Add = case is_integer(KeyVal) of
 		true when Keys == [] ->
-			Add = <<(list_to_binary(integer_to_list(KeyVal)))/binary>>;
+			<<(list_to_binary(integer_to_list(KeyVal)))/binary>>;
 		true ->
-			Add = <<(list_to_binary(integer_to_list(KeyVal)))/binary,"_">>;
+			<<(list_to_binary(integer_to_list(KeyVal)))/binary,"_">>;
 		false ->
-			Add = <<>>
+			<<>>
 	end,
 	gen_keyname(Keys, Fields, KeyIndex+1, <<Name/binary, "_", (atom_to_binary(FieldName, latin1))/binary, "_", Add/binary>>);
 gen_keyname([], _, _, <<"_", Name/binary>>) ->
@@ -1022,13 +1022,13 @@ decoderec(Rec, Bin) ->
 
 
 decode_records(RecList, <<_ObjSize:32/little, Bin/binary>>, TupleSize, Name, TabIndex, Fields) ->
-	case TabIndex of
+	{NewRec, Remain} = case TabIndex of
 		undefined ->
-			{FieldList, Remain} = get_fields([], Fields, 2, Bin),
-			NewRec = erlang:make_tuple(TupleSize, undefined, [{1, Name}|FieldList]);
+			{FieldList, Remain0} = get_fields([], Fields, 2, Bin),
+			{erlang:make_tuple(TupleSize, undefined, [{1, Name}|FieldList]), Remain0};
 		_ ->
-			{FieldList, Remain} = get_fields([], Fields, 3, Bin),
-			NewRec = erlang:make_tuple(TupleSize, undefined, [{1, Name},{2, TabIndex}|FieldList])
+			{FieldList, Remain1} = get_fields([], Fields, 3, Bin),
+			{erlang:make_tuple(TupleSize, undefined, [{1, Name},{2, TabIndex}|FieldList]), Remain1}
 	end,
 	decode_records([NewRec|RecList], Remain, TupleSize, Name, TabIndex, Fields);
 decode_records(R, <<>>, _, _, _, _) ->
@@ -1052,13 +1052,13 @@ rec_field_list(RecVals, _, [], <<Type:8, Bin/binary>>) ->
 rec_field_list(RecVals, N, [Field|Fields], <<Type:8, Bin/binary>>) ->
 	% io:format("~p~n", [Field]),
 	{Name, ValRem} = decode_cstring(Bin, <<>>),
-	case Field of
+	BinName = case Field of
 		docid ->
-			BinName = <<"_id">>;
+			<<"_id">>;
 		{Fn, _} ->
-			BinName = atom_to_binary(Fn, latin1);
+			atom_to_binary(Fn, latin1);
 		Fn ->
-			BinName = atom_to_binary(Fn, latin1)
+			atom_to_binary(Fn, latin1)
 	end,
 	case BinName of
 		Name ->
@@ -1067,13 +1067,13 @@ rec_field_list(RecVals, N, [Field|Fields], <<Type:8, Bin/binary>>) ->
 					<<LRecSize:32/little, RecObj/binary>> = ValRem,
 					RecSize = LRecSize - 4,
 					<<RecBin:RecSize/binary, Remain/binary>> = RecObj,
-					case is_integer(RecIndex) of
+					{RecLen, RecFields} = case is_integer(RecIndex) of
 						true ->
-							[_|RecFields] = element(RecIndex, ?RECTABLE),
-							RecLen = length(RecFields)+2;
+							[_|RecFields0] = element(RecIndex, ?RECTABLE),
+							{length(RecFields0)+2, RecFields0};
 						false ->
-							RecFields = recfields(RecName),
-							RecLen = length(RecFields)+recoffset(RecName)-1
+							RecFields1 = recfields(RecName),
+							{length(RecFields1)+recoffset(RecName)-1, RecFields1}
 					end,
 					[Value] = decode_records([], <<LRecSize:32/little, RecBin/binary>>, RecLen,
 													RecName, RecIndex, RecFields),
